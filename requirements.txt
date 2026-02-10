@@ -1,0 +1,12 @@
+asgiref==3.11.1
+cffi==2.0.0
+cryptography==46.0.4
+Django==5.2.11
+django-cors-headers==4.9.0
+djangorestframework==3.16.1
+mysqlclient==2.2.7
+pycparser==3.0
+PyMySQL==1.1.2
+python-decouple==3.8
+sqlparse==0.5.5
+tzdata==2025.3
