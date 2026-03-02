@@ -43,10 +43,12 @@ class ServiceRequest(models.Model):
     PENDING = 'pending'
     ACCEPTED = 'accepted'
     DECLINED = 'declined'
+    COMPLETED = 'completed'
     STATUS_CHOICES = [
         (PENDING, 'Pending'),
         (ACCEPTED, 'Accepted'),
         (DECLINED, 'Declined'),
+	(COMPLETED, 'Completed'),
     ]
     customer = models.ForeignKey(User, on_delete=models.CASCADE, related_name='requests')
     service = models.ForeignKey(Service, on_delete=models.CASCADE, related_name='requests')

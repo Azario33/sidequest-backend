@@ -78,6 +78,36 @@ def get_current_user(request):
     return Response(UserSerializer(request.user).data)
 
 
+@api_view(['POST'])
+def create_request(request):
+    customer = request.user
+
+    if customer.role == 'provider':
+        return Response({'error': 'Providers cannot request services.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    service_id = request.data.get('service')
+    message = request.data.get('message', '')
+
+    try:
+        service = Service.objects.get(id=service_id)
+    except Service.DoesNotExist:
+        return Response({'error': 'Service not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+    if service.provider.user == customer:
+        return Response({'error': 'You cannot request your own service.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    if ServiceRequest.objects.filter(customer=customer, service=service, status__in=['pending', 'accepted']).exists():
+        return Response({'error': 'You already have an active request for this service.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    service_request = ServiceRequest.objects.create(
+        customer=customer,
+        service=service,
+        message=message
+    )
+
+    return Response(ServiceRequestSerializer(service_request).data, status=status.HTTP_201_CREATED)
+
+
 class UserViewSet(viewsets.ModelViewSet):
     queryset = User.objects.all()
     serializer_class = UserSerializer
