@@ -1,7 +1,7 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from .views import (
-    test_api, register, login, get_current_user, create_request,
+    test_api, register, login, get_current_user, create_request, create_service,
     UserViewSet, ProviderProfileViewSet, ServiceViewSet, ServiceRequestViewSet
 )
 
@@ -17,5 +17,6 @@ urlpatterns = [
     path('auth/login/', login),
     path('auth/me/', get_current_user),
     path('requests/create/', create_request),
+    path('services/create/', create_service),
     path('', include(router.urls)),
 ]

@@ -108,6 +108,37 @@ def create_request(request):
     return Response(ServiceRequestSerializer(service_request).data, status=status.HTTP_201_CREATED)
 
 
+@api_view(['POST'])
+def create_service(request):
+    user = request.user
+
+    if user.role != 'provider':
+        return Response({'error': 'Only providers can create services.'}, status=status.HTTP_403_FORBIDDEN)
+
+    try:
+        provider_profile = ProviderProfile.objects.get(user=user)
+    except ProviderProfile.DoesNotExist:
+        return Response({'error': 'Provider profile not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+    title = request.data.get('title')
+    description = request.data.get('description')
+    category = request.data.get('category')
+    price = request.data.get('price')
+
+    if not title or not description or not category or not price:
+        return Response({'error': 'Please fill in all fields.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    service = Service.objects.create(
+        provider=provider_profile,
+        title=title,
+        description=description,
+        category=category,
+        price=price
+    )
+
+    return Response(ServiceSerializer(service).data, status=status.HTTP_201_CREATED)
+
+
 class UserViewSet(viewsets.ModelViewSet):
     queryset = User.objects.all()
     serializer_class = UserSerializer
