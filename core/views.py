@@ -156,6 +156,17 @@ class ServiceViewSet(viewsets.ModelViewSet):
 
 
 class ServiceRequestViewSet(viewsets.ModelViewSet):
-    queryset = ServiceRequest.objects.all()
     serializer_class = ServiceRequestSerializer
     permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        user = self.request.user
+        if user.role == 'provider':
+            try:
+                provider_profile = ProviderProfile.objects.get(user=user)
+                return ServiceRequest.objects.filter(service__provider=provider_profile)
+            except ProviderProfile.DoesNotExist:
+                return ServiceRequest.objects.none()
+        elif user.role == 'customer':
+            return ServiceRequest.objects.filter(customer=user)
+        return ServiceRequest.objects.none()

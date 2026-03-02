@@ -9,7 +9,7 @@ router = DefaultRouter()
 router.register(r'users', UserViewSet)
 router.register(r'providers', ProviderProfileViewSet)
 router.register(r'services', ServiceViewSet)
-router.register(r'requests', ServiceRequestViewSet)
+router.register(r'requests', ServiceRequestViewSet, basename='servicerequest')
 
 urlpatterns = [
     path('test/', test_api),
