@@ -10,11 +10,11 @@ from django.core.mail import send_mail
 from rest_framework import viewsets, permissions, status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
-from rest_framework.permissions import AllowAny
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import authenticate
-from .models import User, ProviderProfile, Service, ServiceRequest, PasswordResetCode
-from .serializers import UserSerializer, ProviderProfileSerializer, ServiceSerializer, ServiceRequestSerializer
+from .models import User, ProviderProfile, Service, ServiceRequest, PasswordResetCode, Notification
+from .serializers import UserSerializer, ProviderProfileSerializer, ServiceSerializer, ServiceRequestSerializer, NotificationSerializer
 
 
 # Simple test endpoint to confirm the backend is running
@@ -102,6 +102,7 @@ def get_current_user(request):
 
 # Handles a customer submitting a service request
 # Includes several validation checks to prevent misuse
+# Also creates a notification for the provider
 @api_view(['POST'])
 def create_request(request):
     customer = request.user
@@ -128,11 +129,18 @@ def create_request(request):
     if ServiceRequest.objects.filter(customer=customer, service=service, status__in=['pending', 'accepted']).exists():
         return Response({'error': 'You already have an active request for this service.'}, status=status.HTTP_400_BAD_REQUEST)
 
-    # Create and return the service request
+    # Create the service request
     service_request = ServiceRequest.objects.create(
         customer=customer,
         service=service,
         message=message
+    )
+
+    # Notify the provider that they have a new service request
+    Notification.objects.create(
+        recipient=service.provider.user,
+        message=f'{customer.username} has requested your service "{service.title}".',
+        request=service_request
     )
 
     return Response(ServiceRequestSerializer(service_request).data, status=status.HTTP_201_CREATED)
@@ -399,6 +407,45 @@ def confirm_password_reset(request):
     return Response({'message': 'Password reset successfully. You can now log in.'})
 
 
+# Returns all notifications for the logged in user, newest first
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_notifications(request):
+    notifications = Notification.objects.filter(
+        recipient=request.user
+    ).order_by('-created_at')
+    return Response(NotificationSerializer(notifications, many=True).data)
+
+
+# Returns only the unread count (used by the navbar badge)
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_unread_count(request):
+    count = Notification.objects.filter(recipient=request.user, is_read=False).count()
+    return Response({'count': count})
+
+
+# Marks all of the logged in user's notifications as read
+@api_view(['PATCH'])
+@permission_classes([IsAuthenticated])
+def mark_all_read(request):
+    Notification.objects.filter(recipient=request.user, is_read=False).update(is_read=True)
+    return Response({'message': 'All notifications marked as read'})
+
+
+# Marks a single notification as read by ID
+@api_view(['PATCH'])
+@permission_classes([IsAuthenticated])
+def mark_notification_read(request, notification_id):
+    try:
+        notification = Notification.objects.get(id=notification_id, recipient=request.user)
+    except Notification.DoesNotExist:
+        return Response({'error': 'Notification not found'}, status=404)
+    notification.is_read = True
+    notification.save()
+    return Response(NotificationSerializer(notification).data)
+
+
 # Standard CRUD viewset for users
 class UserViewSet(viewsets.ModelViewSet):
     queryset = User.objects.all()
@@ -443,3 +490,29 @@ class ServiceRequestViewSet(viewsets.ModelViewSet):
 
         # Return nothing if role is unrecognised
         return ServiceRequest.objects.none()
+
+    def partial_update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        new_status = request.data.get('status')
+
+        allowed = ['accepted', 'declined', 'completed']
+        if new_status not in allowed:
+            return Response({'error': f'Invalid status. Must be one of: {allowed}'}, status=400)
+
+        instance.status = new_status
+        instance.save()
+
+        # Notify the customer when the provider updates the request status
+        status_messages = {
+            'accepted': f'Your request for "{instance.service.title}" has been accepted! 🎉',
+            'declined': f'Your request for "{instance.service.title}" was declined.',
+            'completed': f'Your request for "{instance.service.title}" has been marked as completed. ✅',
+        }
+
+        Notification.objects.create(
+            recipient=instance.customer,
+            message=status_messages[new_status],
+            request=instance
+        )
+
+        return Response(self.get_serializer(instance).data)

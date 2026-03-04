@@ -10,6 +10,7 @@ from .views import (
     create_service, update_service,
     update_provider_profile, update_account_settings,
     request_password_reset, confirm_password_reset,
+    get_notifications, get_unread_count, mark_all_read, mark_notification_read,
     UserViewSet, ProviderProfileViewSet, ServiceViewSet, ServiceRequestViewSet
 )
 
@@ -48,6 +49,12 @@ urlpatterns = [
     path('services/create/', create_service),
     path('services/<int:service_id>/update/', update_service),
     path('providers/profile/update/', update_provider_profile),
+
+    # Notification routes
+    path('notifications/', get_notifications),
+    path('notifications/unread-count/', get_unread_count),
+    path('notifications/mark-all-read/', mark_all_read),
+    path('notifications/<int:notification_id>/read/', mark_notification_read),
 
     # Includes all the auto-generated router routes
     path('', include(router.urls)),

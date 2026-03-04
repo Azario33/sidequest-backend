@@ -123,3 +123,28 @@ class PasswordResetCode(models.Model):
 
     def __str__(self):
         return f"Reset code for {self.user.username}"
+
+
+# Stores notifications for both customers and providers
+# Created automatically when request statuses change
+class Notification(models.Model):
+    # The user who receives this notification
+    recipient = models.ForeignKey(User, on_delete=models.CASCADE, related_name='notifications')
+
+    # Human-readable message shown in the notification list
+    message = models.TextField()
+
+    # Whether the user has read this notification (controls badge count)
+    is_read = models.BooleanField(default=False)
+
+    # The related service request (for context/linking)
+    request = models.ForeignKey(
+        ServiceRequest, on_delete=models.CASCADE,
+        related_name='notifications', null=True, blank=True
+    )
+
+    # When the notification was created
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"Notification for {self.recipient.username}: {self.message[:40]}"
