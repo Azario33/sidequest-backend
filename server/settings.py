@@ -12,6 +12,7 @@ https://docs.djangoproject.com/en/6.0/ref/settings/
 
 from pathlib import Path
 from decouple import config
+from datetime import timedelta
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -38,11 +39,11 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
-    
+
     # Third party
     'rest_framework',
     'corsheaders',
-    
+
     # Local apps
     'core',
 ]
@@ -88,9 +89,9 @@ WSGI_APPLICATION = 'server.wsgi.application'
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.mysql',
-        'NAME': 'sidequest_db',       # your database name
-        'USER': 'sidequest_user',     # your MySQL username
-        'PASSWORD': 'YourStrongPassword',  # must match the one you set
+        'NAME': 'sidequest_db',
+        'USER': 'sidequest_user',
+        'PASSWORD': 'YourStrongPassword',
         'HOST': 'localhost',
         'PORT': '3306',
     }
@@ -151,9 +152,17 @@ REST_FRAMEWORK = {
 CORS_ALLOW_ALL_ORIGINS = True  # For development only
 
 # JWT Configuration
-from datetime import timedelta
-
 SIMPLE_JWT = {
     'ACCESS_TOKEN_LIFETIME': timedelta(days=1),
     'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
 }
+
+# Email Configuration (Gmail SMTP)
+# Uses the SideQuest noreply Gmail account to send password reset codes
+EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+EMAIL_HOST = 'smtp.gmail.com'
+EMAIL_PORT = 587
+EMAIL_USE_TLS = True
+EMAIL_HOST_USER = 'sidequest.noreply@gmail.com'
+EMAIL_HOST_PASSWORD = 'zcloicsfzhajoszn'
+DEFAULT_FROM_EMAIL = 'SideQuest <sidequest.noreply@gmail.com>'

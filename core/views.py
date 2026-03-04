@@ -3,13 +3,17 @@
 # Each function or class here handles a specific API request from the frontend
 
 import re
+import random
+from datetime import timedelta
+from django.utils import timezone
+from django.core.mail import send_mail
 from rest_framework import viewsets, permissions, status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework.permissions import AllowAny
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import authenticate
-from .models import User, ProviderProfile, Service, ServiceRequest
+from .models import User, ProviderProfile, Service, ServiceRequest, PasswordResetCode
 from .serializers import UserSerializer, ProviderProfileSerializer, ServiceSerializer, ServiceRequestSerializer
 
 
@@ -134,6 +138,37 @@ def create_request(request):
     return Response(ServiceRequestSerializer(service_request).data, status=status.HTTP_201_CREATED)
 
 
+# Allows a customer to cancel a pending request
+# Only the customer who made the request can cancel it, and only if it is still pending
+@api_view(['PATCH'])
+def cancel_request(request, request_id):
+    customer = request.user
+
+    # Only customers can cancel requests
+    if customer.role != 'customer':
+        return Response({'error': 'Only customers can cancel requests.'}, status=status.HTTP_403_FORBIDDEN)
+
+    # Check the request exists
+    try:
+        service_request = ServiceRequest.objects.get(id=request_id)
+    except ServiceRequest.DoesNotExist:
+        return Response({'error': 'Request not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+    # Make sure this customer owns the request
+    if service_request.customer != customer:
+        return Response({'error': 'You can only cancel your own requests.'}, status=status.HTTP_403_FORBIDDEN)
+
+    # Only pending requests can be cancelled
+    if service_request.status != 'pending':
+        return Response({'error': 'Only pending requests can be cancelled.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    # Mark the request as declined (cancelled)
+    service_request.status = 'declined'
+    service_request.save()
+
+    return Response(ServiceRequestSerializer(service_request).data)
+
+
 # Handles a provider creating a new service listing
 # Automatically links the service to the logged in provider's profile
 @api_view(['POST'])
@@ -169,6 +204,199 @@ def create_service(request):
     )
 
     return Response(ServiceSerializer(service).data, status=status.HTTP_201_CREATED)
+
+
+# Allows a provider to edit an existing service they own
+# Only the provider who created the service can edit it
+@api_view(['PATCH'])
+def update_service(request, service_id):
+    user = request.user
+
+    # Only providers can edit services
+    if user.role != 'provider':
+        return Response({'error': 'Only providers can edit services.'}, status=status.HTTP_403_FORBIDDEN)
+
+    # Check the service exists
+    try:
+        service = Service.objects.get(id=service_id)
+    except Service.DoesNotExist:
+        return Response({'error': 'Service not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+    # Make sure this provider owns the service
+    if service.provider.user != user:
+        return Response({'error': 'You can only edit your own services.'}, status=status.HTTP_403_FORBIDDEN)
+
+    # Only update fields that were actually sent in the request
+    title = request.data.get('title')
+    description = request.data.get('description')
+    category = request.data.get('category')
+    price = request.data.get('price')
+
+    if title is not None:
+        service.title = title
+    if description is not None:
+        service.description = description
+    if category is not None:
+        service.category = category
+    if price is not None:
+        service.price = price
+
+    service.save()
+
+    return Response(ServiceSerializer(service).data)
+
+
+# Allows a provider to update their own profile
+# Handles bio, service area and availability updates
+@api_view(['PATCH'])
+def update_provider_profile(request):
+    user = request.user
+
+    # Only providers have a profile to update
+    if user.role != 'provider':
+        return Response({'error': 'Only providers can update a profile.'}, status=status.HTTP_403_FORBIDDEN)
+
+    try:
+        profile = ProviderProfile.objects.get(user=user)
+    except ProviderProfile.DoesNotExist:
+        return Response({'error': 'Provider profile not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+    # Only update fields that were actually sent in the request
+    bio = request.data.get('bio')
+    service_area = request.data.get('service_area')
+    is_available = request.data.get('is_available')
+
+    if bio is not None:
+        profile.bio = bio
+    if service_area is not None:
+        profile.service_area = service_area
+    if is_available is not None:
+        profile.is_available = is_available
+
+    profile.save()
+
+    return Response(ProviderProfileSerializer(profile).data)
+
+
+# Allows any logged in user (customer or provider) to update their email and/or password
+# Password changes return fresh JWT tokens so the user stays logged in
+@api_view(['PATCH'])
+def update_account_settings(request):
+    user = request.user
+
+    email = request.data.get('email')
+    new_password = request.data.get('new_password')
+
+    # Update email if provided, checking it isn't already taken by another account
+    if email:
+        if User.objects.filter(email=email).exclude(id=user.id).exists():
+            return Response({'error': 'Email is already in use.'}, status=status.HTTP_400_BAD_REQUEST)
+        user.email = email
+
+    # Update password if provided, applying the same strength rules as registration
+    if new_password:
+        if len(new_password) < 8:
+            return Response({'error': 'Password must be at least 8 characters.'}, status=status.HTTP_400_BAD_REQUEST)
+        if not re.search(r'[A-Z]', new_password):
+            return Response({'error': 'Password must contain at least one uppercase letter.'}, status=status.HTTP_400_BAD_REQUEST)
+        if not re.search(r'[0-9]', new_password):
+            return Response({'error': 'Password must contain at least one number.'}, status=status.HTTP_400_BAD_REQUEST)
+        if not re.search(r'[!@#$%^&*]', new_password):
+            return Response({'error': 'Password must contain at least one symbol (!@#$%^&*).'}, status=status.HTTP_400_BAD_REQUEST)
+        user.set_password(new_password)
+
+    user.save()
+
+    # Return fresh JWT tokens so the session stays valid after a password change
+    refresh = RefreshToken.for_user(user)
+    return Response({
+        'message': 'Account updated successfully.',
+        'user': UserSerializer(user).data,
+        'token': str(refresh.access_token),
+        'refresh': str(refresh),
+    })
+
+
+# Sends a 6-digit reset code to the user's email address
+# The code expires after 15 minutes for security
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def request_password_reset(request):
+    email = request.data.get('email')
+
+    if not email:
+        return Response({'error': 'Please provide an email address.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    # Check an account with this email exists
+    try:
+        user = User.objects.get(email=email)
+    except User.DoesNotExist:
+        # Return success even if email not found to prevent email enumeration attacks
+        return Response({'message': 'If an account with that email exists, a reset code has been sent.'})
+
+    # Delete any existing reset codes for this user before creating a new one
+    PasswordResetCode.objects.filter(user=user).delete()
+
+    # Generate a random 6-digit code
+    code = str(random.randint(100000, 999999))
+
+    # Save the code with a 15 minute expiry
+    PasswordResetCode.objects.create(
+        user=user,
+        code=code,
+        expires_at=timezone.now() + timedelta(minutes=15)
+    )
+
+    # Send the code to the user's email
+    send_mail(
+        subject='Your SideQuest Password Reset Code',
+        message=f'Hi {user.username},\n\nYour password reset code is: {code}\n\nThis code expires in 15 minutes.\n\nIf you did not request this, please ignore this email.\n\n— The SideQuest Team',
+        from_email=None,  # Uses DEFAULT_FROM_EMAIL from settings
+        recipient_list=[email],
+    )
+
+    return Response({'message': 'If an account with that email exists, a reset code has been sent.'})
+
+
+# Verifies the reset code and sets the new password
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def confirm_password_reset(request):
+    email = request.data.get('email')
+    code = request.data.get('code')
+    new_password = request.data.get('new_password')
+
+    if not email or not code or not new_password:
+        return Response({'error': 'Please provide email, code and new password.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    # Find the reset code record
+    try:
+        reset = PasswordResetCode.objects.get(user__email=email, code=code)
+    except PasswordResetCode.DoesNotExist:
+        return Response({'error': 'Invalid reset code.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    # Check the code has not expired
+    if reset.expires_at < timezone.now():
+        reset.delete()
+        return Response({'error': 'Reset code has expired. Please request a new one.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    # Password strength validation
+    if len(new_password) < 8:
+        return Response({'error': 'Password must be at least 8 characters.'}, status=status.HTTP_400_BAD_REQUEST)
+    if not re.search(r'[A-Z]', new_password):
+        return Response({'error': 'Password must contain at least one uppercase letter.'}, status=status.HTTP_400_BAD_REQUEST)
+    if not re.search(r'[0-9]', new_password):
+        return Response({'error': 'Password must contain at least one number.'}, status=status.HTTP_400_BAD_REQUEST)
+    if not re.search(r'[!@#$%^&*]', new_password):
+        return Response({'error': 'Password must contain at least one symbol (!@#$%^&*).'}, status=status.HTTP_400_BAD_REQUEST)
+
+    # Set the new password and delete the used reset code
+    user = reset.user
+    user.set_password(new_password)
+    user.save()
+    reset.delete()
+
+    return Response({'message': 'Password reset successfully. You can now log in.'})
 
 
 # Standard CRUD viewset for users

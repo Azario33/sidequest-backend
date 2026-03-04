@@ -104,3 +104,22 @@ class ServiceRequest(models.Model):
 
     def __str__(self):
         return f"{self.customer.username} -> {self.service.title} ({self.status})"
+
+
+# Stores temporary 6-digit password reset codes sent to users via email
+# Each code expires after 15 minutes and is deleted once used
+class PasswordResetCode(models.Model):
+    # Links the code to the user who requested the reset
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='reset_codes')
+
+    # The 6-digit code sent to the user's email
+    code = models.CharField(max_length=6)
+
+    # When the code was created
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    # When the code expires (15 minutes after creation)
+    expires_at = models.DateTimeField()
+
+    def __str__(self):
+        return f"Reset code for {self.user.username}"
