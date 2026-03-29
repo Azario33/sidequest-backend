@@ -274,12 +274,22 @@ def update_provider_profile(request):
     service_area = request.data.get('service_area')
     is_available = request.data.get('is_available')
 
+    # Latitude and longitude are sent when the provider sets their location via the map
+    latitude = request.data.get('latitude')
+    longitude = request.data.get('longitude')
+
     if bio is not None:
         profile.bio = bio
     if service_area is not None:
         profile.service_area = service_area
     if is_available is not None:
         profile.is_available = is_available
+
+    # Save coordinates if provided — these power the distance filtering for customers
+    if latitude is not None:
+        profile.latitude = latitude
+    if longitude is not None:
+        profile.longitude = longitude
 
     profile.save()
 
